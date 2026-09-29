@@ -1,0 +1,66 @@
+# 講座用のローカル環境（WordPress・データベース・確認用メールボックス・WP-CLI）
+name: hinata-demo
+
+x-wordpress-env: &wordpress-env
+  WORDPRESS_DB_HOST: db
+  WORDPRESS_DB_NAME: wordpress
+  WORDPRESS_DB_USER: wordpress
+  WORDPRESS_DB_PASSWORD: wordpress
+  WORDPRESS_CONFIG_EXTRA: |
+    define( 'WP_ENVIRONMENT_TYPE', 'local' );
+
+services:
+  db:
+    image: mariadb:11.4.13
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  wordpress:
+    image: wordpress:7.1.2-php8.3-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8090:80"
+    environment: *wordpress-env
+    volumes:
+      - wp_data:/var/www/html
+      - ./docker/mu-plugins:/var/www/html/wp-content/mu-plugins:ro
+      - ./theme:/var/www/html/wp-content/themes/hinata
+
+  # WP-CLI（例：docker compose run --rm wpcli wp core install ...）
+  wpcli:
+    image: wordpress:cli-2.12.0-php8.3
+    profiles: ["cli"]
+    user: "33:33"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *wordpress-env
+      HOME: /tmp
+    volumes:
+      - wp_data:/var/www/html
+      - ./docker/mu-plugins:/var/www/html/wp-content/mu-plugins:ro
+      - ./theme:/var/www/html/wp-content/themes/hinata
+      - ./static-site:/static-site:ro
+
+  # フォームから送信したメールを受け取る確認用メールボックス
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    ports:
+      - "127.0.0.1:8091:8025"
+
+volumes:
+  db_data:
+  wp_data:

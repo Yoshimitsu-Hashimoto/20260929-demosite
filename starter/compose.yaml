@@ -54,6 +54,7 @@ services:
       - ./docker/mu-plugins:/var/www/html/wp-content/mu-plugins:ro
       - ./theme:/var/www/html/wp-content/themes/hinata
       - ./static-site:/static-site:ro
+      - ./scripts:/scripts:ro
 
   # フォームから送信したメールを受け取る確認用メールボックス
   mailpit:

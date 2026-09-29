@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * 2. 制作実績一覧（/works/） TC-01〜TC-18
+ * 2. 制作実績一覧（/works/） TC-01〜TC-18、並べ替え TC-48〜TC-56
  */
 
 const NAVY = 'rgb(23, 59, 91)'; // #173b5b
@@ -177,4 +177,131 @@ test('TC-18 存在しない業種は0件で、どのボタンも選択状態に�
   await expect(page.getByText('該当する実績はありません。')).toBeVisible();
   await expect(countText(page)).toHaveText('0件の実績');
   await expectSelected(page, null);
+});
+
+/* 並べ替え（SPEC-14〜SPEC-16） */
+
+const BY_YEAR_DESC = [
+  '和食処 やまの葉 様',
+  '高橋精密工業株式会社 様',
+  'はるかサービス 様',
+  'カフェ こもれび 様',
+  '株式会社青木製作所 様',
+  'みどり不動産 様',
+  'ベーカリー麦の音 様',
+  '東和木工株式会社 様',
+  'さくら学習室 様',
+];
+const BY_YEAR_ASC = [
+  'みどり不動産 様',
+  'ベーカリー麦の音 様',
+  '東和木工株式会社 様',
+  'はるかサービス 様',
+  'カフェ こもれび 様',
+  '株式会社青木製作所 様',
+  '和食処 やまの葉 様',
+  '高橋精密工業株式会社 様',
+  'さくら学習室 様',
+];
+const NO_YEAR_TITLE = 'さくら学習室 様';
+const SORT_NAMES = ['公開日の新しい順', '制作年の新しい順', '制作年の古い順'];
+
+const sortGroup = (page: Page) => page.getByRole('navigation', { name: '並べ替え' });
+const sortLink = (page: Page, name: string) => sortGroup(page).getByRole('link', { name, exact: true });
+
+/** 選んだ並べ替えだけに aria-current="page" が付いていること。 */
+async function expectSortSelected(page: Page, selected: string) {
+  await expect(sortGroup(page).getByRole('link')).toHaveText(SORT_NAMES);
+  for (const name of SORT_NAMES) {
+    if (name === selected) {
+      await expect(sortLink(page, name), `${name} が選択状態`).toHaveAttribute('aria-current', 'page');
+    } else {
+      await expect(sortLink(page, name), `${name} は選択状態でない`).not.toHaveAttribute('aria-current', /.*/);
+    }
+  }
+}
+
+test('TC-48 「制作年の新しい順」を選ぶと制作年の新しい順に並び、未入力は最後', async ({ page }) => {
+  await page.goto('/works/');
+  await sortLink(page, '制作年の新しい順').click();
+  await expect(page).toHaveURL(/\/works\/\?sort=year_desc$/);
+  expect(await cardTitles(page).allInnerTexts()).toEqual(BY_YEAR_DESC);
+  await expect(countText(page)).toHaveText('9件の実績');
+});
+
+test('TC-49 「制作年の古い順」を選ぶと制作年の古い順に並び、未入力は最後', async ({ page }) => {
+  await page.goto('/works/');
+  await sortLink(page, '制作年の古い順').click();
+  await expect(page).toHaveURL(/\/works\/\?sort=year_asc$/);
+  expect(await cardTitles(page).allInnerTexts()).toEqual(BY_YEAR_ASC);
+  await expect(countText(page)).toHaveText('9件の実績');
+});
+
+test('TC-50 制作年が未入力の「さくら学習室 様」はどちらの並べ替えでも最後に表示される', async ({ page }) => {
+  for (const sort of ['year_desc', 'year_asc']) {
+    await page.goto(`/works/?sort=${sort}`);
+    const titles = await cardTitles(page).allInnerTexts();
+    expect(titles, `${sort}：9件`).toHaveLength(9);
+    expect(titles.at(-1), `${sort}：未入力は最後`).toBe(NO_YEAR_TITLE);
+  }
+});
+
+test('TC-51 「飲食」を選んでから「制作年の古い順」を選ぶと、絞り込みを保ったまま並ぶ', async ({ page }) => {
+  await page.goto('/works/');
+  await filterButton(page, '飲食').click();
+  await sortLink(page, '制作年の古い順').click();
+  const url = new URL(page.url());
+  expect(url.searchParams.get('industry')).toBe('food');
+  expect(url.searchParams.get('sort')).toBe('year_asc');
+  expect(await cardTitles(page).allInnerTexts()).toEqual(['ベーカリー麦の音 様', 'カフェ こもれび 様', '和食処 やまの葉 様']);
+  await expect(countText(page)).toHaveText('3件の実績');
+  await expectSelected(page, '飲食');
+  await expectSortSelected(page, '制作年の古い順');
+});
+
+test('TC-52 「制作年の新しい順」を選んでから「サービス」を選ぶと、並べ替えを保ったまま絞り込む', async ({ page }) => {
+  await page.goto('/works/');
+  await sortLink(page, '制作年の新しい順').click();
+  await filterButton(page, 'サービス').click();
+  const url = new URL(page.url());
+  expect(url.searchParams.get('industry')).toBe('service');
+  expect(url.searchParams.get('sort')).toBe('year_desc');
+  expect(await cardTitles(page).allInnerTexts()).toEqual(['はるかサービス 様', 'みどり不動産 様', 'さくら学習室 様']);
+  await expect(countText(page)).toHaveText('3件の実績');
+  await expectSelected(page, 'サービス');
+  await expectSortSelected(page, '制作年の新しい順');
+});
+
+test('TC-53 「飲食」＋「制作年の新しい順」でも下書きの実績は表示されない', async ({ page }) => {
+  await page.goto('/works/?industry=food&sort=year_desc');
+  expect(await cardTitles(page).allInnerTexts()).toEqual(['和食処 やまの葉 様', 'カフェ こもれび 様', 'ベーカリー麦の音 様']);
+  await expect(page.getByText(DRAFT_TITLE)).toHaveCount(0);
+});
+
+test('TC-54 「医療」＋「制作年の新しい順」は「該当する実績はありません。」「0件の実績」', async ({ page }) => {
+  await page.goto('/works/?industry=medical&sort=year_desc');
+  await expect(cards(page)).toHaveCount(0);
+  await expect(page.getByText('該当する実績はありません。')).toBeVisible();
+  await expect(countText(page)).toHaveText('0件の実績');
+  await expectSelected(page, '医療');
+  await expectSortSelected(page, '制作年の新しい順');
+});
+
+test('TC-55 ?sort=unknown と ?sort= は公開日の新しい順で表示される', async ({ page }) => {
+  for (const path of ['/works/?sort=unknown', '/works/?sort=']) {
+    const res = await page.goto(path);
+    expect(res?.status(), path).toBe(200);
+    expect(await cardTitles(page).allInnerTexts(), path).toEqual(ALL_TITLES);
+    await expect(countText(page)).toHaveText('9件の実績');
+    await expectSortSelected(page, '公開日の新しい順');
+  }
+});
+
+test('TC-56 選んだ並べ替えだけに aria-current="page" が付く', async ({ page }) => {
+  await page.goto('/works/');
+  await expectSortSelected(page, '公開日の新しい順');
+  for (const name of SORT_NAMES) {
+    await sortLink(page, name).click();
+    await expectSortSelected(page, name);
+  }
 });

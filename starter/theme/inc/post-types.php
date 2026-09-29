@@ -113,17 +113,55 @@ function hinata_get_requested_industry() {
 }
 
 /**
- * 制作実績の一覧を取得する（公開済みのみ、公開日の新しい順）。
+ * URL の ?sort= を読み取る。
+ *
+ * 戻り値は 'year_desc'（制作年の新しい順）、'year_asc'（制作年の古い順）、
+ * ''（公開日の新しい順。指定なし・空・存在しない値）のいずれか。
+ *
+ * @return string
+ */
+function hinata_get_requested_sort() {
+	if ( ! isset( $_GET['sort'] ) || ! is_string( $_GET['sort'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		return '';
+	}
+
+	$sort = sanitize_key( wp_unslash( $_GET['sort'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+	return array_key_exists( $sort, hinata_get_sort_options() ) ? $sort : '';
+}
+
+/**
+ * 並べ替えの選択肢（表示順）。キーは ?sort= の値（'' は指定なし）。
+ *
+ * @return array<string, string>
+ */
+function hinata_get_sort_options() {
+	return array(
+		''          => '公開日の新しい順',
+		'year_desc' => '制作年の新しい順',
+		'year_asc'  => '制作年の古い順',
+	);
+}
+
+/**
+ * 制作実績の一覧を取得する（公開済みのみ）。
+ *
+ * 並び順は公開日の新しい順。$sort に 'year_desc' / 'year_asc' を指定すると、
+ * カスタムフィールド production_year の順に並べ替える（同じ年は公開日の新しい順、未入力は最後）。
  *
  * @param WP_Term|false|null $industry hinata_get_requested_industry() の戻り値。
  * @param int                $limit    件数。-1 ですべて。
+ * @param string             $sort     hinata_get_requested_sort() の戻り値。
  * @return WP_Query
  */
-function hinata_query_works( $industry = null, $limit = -1 ) {
+function hinata_query_works( $industry = null, $limit = -1, $sort = '' ) {
+	$by_year = in_array( $sort, array( 'year_desc', 'year_asc' ), true );
+
 	$args = array(
 		'post_type'           => 'work',
 		'post_status'         => 'publish',
-		'posts_per_page'      => $limit,
+		// 制作年で並べるときは全件を並べ替えてから件数を絞る。
+		'posts_per_page'      => $by_year ? -1 : $limit,
 		'orderby'             => 'date',
 		'order'               => 'DESC',
 		'ignore_sticky_posts' => true,
@@ -143,5 +181,35 @@ function hinata_query_works( $industry = null, $limit = -1 ) {
 		$args['post__in'] = array( 0 );
 	}
 
-	return new WP_Query( $args );
+	$query = new WP_Query( $args );
+
+	if ( $by_year ) {
+		// meta_key で並べると制作年が未入力の実績がクエリから外れるため、取得後に PHP で並べ替える。
+		// usort は安定ソートなので、同じ年の実績は取得時の公開日の新しい順のまま残る。
+		$posts = $query->posts;
+		usort(
+			$posts,
+			static function ( $a, $b ) use ( $sort ) {
+				$year_a = trim( (string) get_post_meta( $a->ID, 'production_year', true ) );
+				$year_b = trim( (string) get_post_meta( $b->ID, 'production_year', true ) );
+
+				if ( '' === $year_a || '' === $year_b ) {
+					return ( '' === $year_a ) <=> ( '' === $year_b ); // 未入力は最後。
+				}
+
+				return 'year_asc' === $sort ? (int) $year_a <=> (int) $year_b : (int) $year_b <=> (int) $year_a;
+			}
+		);
+
+		if ( $limit > 0 ) {
+			$posts = array_slice( $posts, 0, $limit );
+		}
+
+		$query->posts      = $posts;
+		$query->post_count = count( $posts );
+		$query->post       = $posts ? $posts[0] : null;
+		$query->rewind_posts();
+	}
+
+	return $query;
 }

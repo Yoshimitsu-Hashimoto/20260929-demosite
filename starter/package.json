@@ -1,0 +1,12 @@
+{
+  "name": "hinata-demo-tests",
+  "private": true,
+  "description": "株式会社ひなた デモサイトの E2E テスト（docs/test-plan.md）",
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}
